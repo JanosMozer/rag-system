@@ -25,7 +25,6 @@ def setup_logging(username: str):
 
 def main():
     """Main function to run the RAG system."""
-    print("--- RAG System with OpenRouter ---")
 
     # --- Authentication ---
     username = input("Enter username: ")
@@ -37,7 +36,7 @@ def main():
         print("Authentication failed. Invalid username or code.")
         return
 
-    print(f"Welcome, {user.username}! You are logged in as {user.role}.")
+    print(f"Logged in as {user.role}.")
     
     # --- Setup ---
     setup_logging(user.username)
@@ -48,14 +47,12 @@ def main():
     if not embeddings:
         print("Could not initialize embedding model. Exiting.")
         return
-
-    print("Ready to answer your questions.")
     
     # --- Main Loop ---
     while True:
-        question = input("\nAsk a question (or type 'exit' to quit): ")
+        question = input("\nAsk a question (or type '/exit' to quit): ")
         
-        if question.lower() == 'exit':
+        if question.lower() == '/exit':
             break
             
         logging.info(f"Question: {question}")
@@ -67,7 +64,7 @@ def main():
         print(answer)
         logging.info(f"Answer: {answer}")
 
-    print("Session ended. Goodbye!")
+    print("Session ended")
     logging.info("User logged out.")
 
 
