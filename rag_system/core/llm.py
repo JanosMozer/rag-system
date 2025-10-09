@@ -11,7 +11,8 @@ def get_llm():
         llm = ChatOpenAI(
             api_key=API_KEY,
             base_url=BASE_URL,
-            model="openai/gpt-3.5-turbo"
+            model="openai/gpt-3.5-turbo",
+            streaming=True
         )
         return llm
     except Exception as e:

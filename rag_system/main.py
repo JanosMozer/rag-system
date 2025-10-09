@@ -48,23 +48,46 @@ def main():
         print("Could not initialize embedding model. Exiting.")
         return
     
+    print("Ready to answer your questions.")
+    
+    chat_history = []
+    
     # --- Main Loop ---
     while True:
-        question = input("\nAsk a question (or type '/exit' to quit): ")
+        question = input("\nAsk a question (or type 'exit' to quit): ")
         
-        if question.lower() == '/exit':
+        if question.lower() == 'exit':
             break
             
         logging.info(f"Question: {question}")
         
         print("\nThinking...")
-        answer = run_rag_pipeline(user, question, embeddings)
+        result = run_rag_pipeline(user, question, embeddings, chat_history)
+        answer = result["answer"]
+        source_documents = result["source_documents"]
+        
+        # Update chat history
+        chat_history.append({"role": "user", "content": question})
+        chat_history.append({"role": "assistant", "content": answer})
         
         print("\nAnswer:")
         print(answer)
         logging.info(f"Answer: {answer}")
 
-    print("Session ended")
+        if source_documents:
+            print("\nSources:")
+            # Use a set to store unique source paths to avoid duplicates
+            unique_sources = set()
+            for doc in source_documents:
+                source_path = doc.metadata.get('source', 'Unknown')
+                unique_sources.add(os.path.basename(source_path))
+            
+            for source in unique_sources:
+                print(f"- {source}")
+                logging.info(f"Source: {source}")
+
+
+    print("Session ended. Goodbye!")
     logging.info("User logged out.")
 
 

@@ -8,4 +8,5 @@ requests
 sentence-transformers
 chromadb
 numpy
-dotenv
+docx2txt
+streamlit

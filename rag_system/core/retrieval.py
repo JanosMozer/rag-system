@@ -1,60 +1,84 @@
-from operator import itemgetter
-from typing import List
+from typing import List, Dict, Any
 
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import AIMessage, HumanMessage
 
 from core.llm import get_llm
 from core.vectorstore import create_or_load_vectorstore
 from users.schema import User
 from utils.file_io import load_documents_from_directories
+from core.access_control import get_accessible_directories
 
-
-def _create_rag_chain(llm, retriever):
-    """Creates the RAG chain."""
-    template = """
-    Answer the question based only on the following context:
-    {context}
-
-    Question: {question}
+def run_rag_pipeline(user: User, question: str, embeddings, chat_history: List[Dict[str, str]]) -> Dict[str, Any]:
     """
-    prompt = ChatPromptTemplate.from_template(template)
-
-    return (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-    )
-
-def _format_docs(docs: List) -> str:
-    """Formats the retrieved documents into a string."""
-    return "\n\n".join(doc.page_content for doc in docs)
-
-def run_rag_pipeline(user: User, question: str, embeddings) -> str:
-    """
-    Runs the RAG pipeline for a given user and question.
+    Runs the RAG pipeline for a given user, question, and chat history.
     """
     accessible_dirs = get_accessible_directories(user)
     documents = load_documents_from_directories(accessible_dirs)
 
     if not documents:
-        return "No documents accessible to the user."
+        return {"answer": "No documents accessible to the user.", "source_documents": []}
 
     vector_store = create_or_load_vectorstore(documents, embeddings, user.role)
     retriever = vector_store.as_retriever()
 
     llm = get_llm()
     if not llm:
-        return "LLM could not be initialized."
+        return {"answer": "LLM could not be initialized.", "source_documents": []}
 
-    rag_chain = _create_rag_chain(llm, retriever)
+    # Contextualize question prompt
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question "
+        "which might reference context in the chat history, "
+        "formulate a standalone question which can be understood "
+        "without the chat history. Do NOT answer the question, "
+        "just reformulate it if needed and otherwise return it as is."
+    )
+    contextualize_q_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", contextualize_q_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
+    )
+
+    # Answering prompt
+    qa_system_prompt = (
+        "You are an assistant for question-answering tasks. "
+        "Use the following pieces of retrieved context to answer "
+        "the question. If you don't know the answer, just say "
+        "that you don't know. Use three sentences maximum and keep the "
+        "answer concise."
+        "\n\n"
+        "{context}"
+    )
+    qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", qa_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+    
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+    
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+    # Convert chat history format
+    langchain_chat_history = []
+    for message in chat_history:
+        if message["role"] == "user":
+            langchain_chat_history.append(HumanMessage(content=message["content"]))
+        elif message["role"] == "assistant":
+            langchain_chat_history.append(AIMessage(content=message["content"]))
 
     try:
-        response = rag_chain.invoke(question)
-        return response.content
+        return rag_chain.stream({"input": question, "chat_history": langchain_chat_history})
     except Exception as e:
         print(f"Error during RAG pipeline execution: {e}")
-        return "An error occurred while generating the answer."
-
-# This is needed to avoid a circular import
-from core.access_control import get_accessible_directories
+        return iter([{"answer": "An error occurred while generating the answer.", "context": []}])
