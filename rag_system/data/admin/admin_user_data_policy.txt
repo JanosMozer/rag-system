@@ -1,0 +1,1 @@
+This document outlines the internal policy regarding user data handling. It details data collection, storage, processing, and deletion protocols to ensure compliance with privacy regulations. All data must be encrypted at rest and in transit. Regular audits are conducted to verify adherence to these policies. Any data breach must be reported immediately to the security team.

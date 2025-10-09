@@ -62,13 +62,25 @@ def main():
         logging.info(f"Question: {question}")
         
         print("\nThinking...")
-        result = run_rag_pipeline(user, question, embeddings, chat_history)
-        answer = result["answer"]
-        source_documents = result["source_documents"]
+        # Call the RAG pipeline in non-streaming mode for CLI
+        # Temporarily create an empty chat_history list, as the CLI is not designed for conversational memory.
+        # The full conversational memory is implemented in the Streamlit app.
+        result_generator = run_rag_pipeline(user, question, embeddings, [])
         
-        # Update chat history
-        chat_history.append({"role": "user", "content": question})
-        chat_history.append({"role": "assistant", "content": answer})
+        # Collect the full answer and sources from the generator
+        answer_parts = []
+        source_documents = []
+        for chunk in result_generator:
+            if "answer" in chunk:
+                answer_parts.append(chunk["answer"])
+            if "context" in chunk:
+                source_documents.extend(chunk["context"])
+        
+        answer = "".join(answer_parts)
+
+        # Update chat history (only if we implement CLI conversation later)
+        # chat_history.append({"role": "user", "content": question})
+        # chat_history.append({"role": "assistant", "content": answer})
         
         print("\nAnswer:")
         print(answer)

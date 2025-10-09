@@ -1,0 +1,5 @@
+task_id,task_name,assignee,due_date,status
+101,Develop Feature A,Charlie,2025-11-15,In Progress
+102,Review Code B,Alice,2025-11-10,Pending
+103,Prepare Marketing Report,Diana,2025-11-20,Not Started
+104,Client Meeting,Bob,2025-11-08,Completed
