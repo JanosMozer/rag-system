@@ -129,3 +129,7 @@ dmypy.json
 # Logs
 logs/
 venv/
+vector_store_admin/
+vector_store_worker/
+vector_store_public/
+vector_store_guest/

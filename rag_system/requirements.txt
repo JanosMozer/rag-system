@@ -10,3 +10,8 @@ chromadb
 numpy
 docx2txt
 streamlit
+fastapi
+uvicorn[standard]
+redis
+PyYAML
+bcrypt

@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from core.access_control import authenticate_user
+from core.access_control import authenticate_user, load_users
 from core.embeddings import get_embedding_model
 from core.retrieval import run_rag_pipeline
 
@@ -12,18 +12,18 @@ def initialize_embeddings():
 def login_page():
     st.title("RAG System Login")
     
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        code = st.text_input("Code", type="password")
-        submitted = st.form_submit_button("Login")
-        
-        if submitted:
-            user = authenticate_user(username, code)
-            if user:
-                st.session_state["user"] = user
-                st.rerun()
-            else:
-                st.error("Invalid username or code")
+    users_data = load_users()
+    usernames = [user.username for user in users_data]
+
+    selected_username = st.selectbox("Select User", usernames)
+    
+    if st.button("Login as Selected User"):
+        selected_user = next((user for user in users_data if user.username == selected_username), None)
+        if selected_user:
+            st.session_state["user"] = selected_user
+            st.rerun()
+        else:
+            st.error("User not found.")
 
 def chat_page():
     st.title("RAG System Chat")

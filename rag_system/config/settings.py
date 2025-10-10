@@ -30,7 +30,8 @@ def get_api_key():
 
 # --- Basic Settings ---
 API_KEY = get_api_key()
-BASE_URL = os.getenv("OPENROUTER_BASE_URL")
+BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "meta-llama/llama-3.3-70b-instruct")
 CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), 'credentials.json')
 
 # --- Data Directories ---
