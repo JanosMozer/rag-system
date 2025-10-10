@@ -1,35 +1,43 @@
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv, set_key
 
-def get_api_key():
+def _get_or_set_env_var(key_name: str, prompt_message: str, optional: bool = True):
     """
-    Retrieves the OpenRouter API key.
-    If .env file is not present, prompts the user for the key
-    and saves it to a new .env file.
+    Loads an environment variable from .env file.
+    If not found, prompts the user for it and saves it to the .env file.
+    If 'optional' is True, it will not prompt if the key is missing.
     """
-    # Construct the path to the .env file
-    # This assumes settings.py is in rag_system/config/
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    dotenv_path = os.path.join(project_dir, '.env')
-
-    # Load existing .env file if it exists
-    if os.path.exists(dotenv_path):
-        load_dotenv(dotenv_path=dotenv_path)
-
-    # Check for the API key
-    api_key = os.getenv("OPENROUTER_API_KEY")
-
-    if not api_key:
-        print("OpenRouter API key not found.")
-        api_key = input("Please enter your OpenRouter API key: ")
-        with open(dotenv_path, "w") as f:
-            f.write(f"OPENROUTER_API_KEY={api_key}\n")
-        print(".env file created and API key saved.")
-
+    load_dotenv()
+    
+    api_key = os.getenv(key_name)
+    
+    if not api_key and not optional:
+        api_key = input(prompt_message)
+        
+        # Find the .env file, creating it if it doesn't exist
+        dotenv_path = find_dotenv()
+        if not dotenv_path:
+            dotenv_path = os.path.join(os.getcwd(), '.env')
+            with open(dotenv_path, 'w') as f:
+                pass # Create an empty .env file
+        
+        set_key(dotenv_path, key_name, api_key)
+        print(f"{key_name} has been saved to your .env file.")
+        
     return api_key
 
+# --- API Keys ---
+OPENROUTER_API_KEY = _get_or_set_env_var(
+    "OPENROUTER_API_KEY", 
+    "Please enter your OpenRouter API key: "
+)
+TAVILY_API_KEY = _get_or_set_env_var(
+    "TAVILY_API_KEY",
+    "Please enter your Tavily API key: ",
+    optional=True
+)
+
 # --- Basic Settings ---
-API_KEY = get_api_key()
 BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "meta-llama/llama-3.3-70b-instruct")
 CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), 'credentials.json')

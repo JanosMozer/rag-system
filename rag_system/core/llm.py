@@ -1,6 +1,6 @@
 from langchain_openai import ChatOpenAI
 
-from config.settings import API_KEY, BASE_URL, MODEL_NAME
+from config.settings import OPENROUTER_API_KEY, BASE_URL, MODEL_NAME
 
 
 def get_llm():
@@ -9,7 +9,7 @@ def get_llm():
     """
     try:
         llm = ChatOpenAI(
-            api_key=API_KEY,
+            api_key=OPENROUTER_API_KEY,
             base_url=BASE_URL,
             model=MODEL_NAME,
             streaming=True
