@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Keep only basic global sizing/typography here. Tailwind utility classes
+	used in JSX will provide the styling for most elements. */
+html, body, #__next { height: 100%; }
+body { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }

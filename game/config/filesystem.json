@@ -1,0 +1,14 @@
+
+{
+  "level-001": {
+    "files": [
+      { "name": "README.md", "content": "This is a test file." },
+      { "name": "secret.txt", "content": "The secret password is: 1234" }
+    ]
+  },
+  "level-002": {
+    "files": [
+        { "name": "document.txt", "content": "This document contains confidential information." }
+    ]
+  }
+}

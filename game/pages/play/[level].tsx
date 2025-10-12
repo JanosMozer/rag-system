@@ -1,0 +1,315 @@
+import type { NextPage, GetStaticPaths, GetStaticProps } from 'next';
+import { useRouter } from 'next/router';
+import { useEffect, useState, useRef } from 'react';
+import { getSessionId } from '../../lib/session';
+import fs from 'fs';
+import path from 'path';
+import FileSystemExplorer from '../../components/FileSystemExplorer';
+import { useSession } from 'next-auth/react';
+import { getAdminMode } from '../../lib/admin';
+
+interface Message {
+  role: 'attacker' | 'assistant';
+  content: string;
+  internalLogs?: string[];
+}
+
+interface FileData {
+    name: string;
+    content: string;
+}
+
+interface Level {
+    id: string;
+    title: string;
+    description: string;
+    goal: string;
+    files: FileData[];
+}
+
+interface LevelPageProps {
+    level: Level;
+}
+
+const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', title: '', description: '', goal: '', files: [] } }) => {
+  const router = useRouter();
+  const { data: session } = useSession();
+  const [level, setLevel] = useState(initialLevel);
+  const [sessionId, setSessionId] = useState<string>('');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState<string>('');
+  const [view, setView] = useState('chat'); // chat or files
+  const [selectedFile, setSelectedFile] = useState<FileData | null>(null);
+  const [editingContent, setEditingContent] = useState<string>('');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [committedState, setCommittedState] = useState<FileData[]>(initialLevel.files || []);
+  const [internalLogs, setInternalLogs] = useState<string[]>([]);
+  const messagesEndRef = useRef<null | HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  useEffect(() => {
+    if (view === 'chat') {
+      scrollToBottom();
+    }
+  }, [messages, view]);
+
+
+  useEffect(() => {
+    setSessionId(getSessionId());
+  }, []);
+
+  const handleFileSelect = (file: FileData) => {
+    setSelectedFile(file);
+    setEditingContent(file.content);
+  }
+
+  const handleSaveFile = () => {
+    if (!selectedFile) return;
+
+    const updatedFiles = level.files.map(f => 
+      f.name === selectedFile.name ? { ...f, content: editingContent } : f
+    );
+
+    setLevel(prevLevel => ({
+      ...prevLevel,
+      files: updatedFiles,
+    }));
+    setHasUnsavedChanges(true);
+
+    alert('File saved! Click "Commit" to make it available to the agent.');
+  }
+
+  const handleCommit = () => {
+    setCommittedState(level.files);
+    setHasUnsavedChanges(false);
+    alert('Changes committed!');
+  }
+
+  const handleSendMessage = async () => {
+    if (!input.trim()) return;
+
+    const userMessage: Message = { role: 'attacker', content: input };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+
+    const res = await fetch('/api/agent/message', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId,
+        levelId: level.id,
+        message: userMessage,
+        files: committedState,
+        isAdmin: getAdminMode(),
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const agentMessage: Message = { role: 'assistant', content: data.reply, internalLogs: data.internalLogs };
+      setMessages((prev) => [...prev, agentMessage]);
+      if (data.internalLogs) {
+        setInternalLogs(prev => [...prev, ...data.internalLogs]);
+      }
+    }
+  };
+
+  const handleSubmitToLeaderboard = async (score: number) => {
+    const res = await fetch('/api/leaderboard', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            levelId: level.id,
+            score,
+        }),
+    });
+
+    if (res.ok) {
+        alert('Score submitted to leaderboard!');
+    } else {
+        alert('Failed to submit score. Are you signed in?');
+    }
+  }
+
+  const handleJudge = async () => {
+    const res = await fetch('/api/judge/evaluate', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            sessionId,
+            levelId: level.id,
+            recordedTranscript: messages,
+            artifacts: { files: committedState },
+        }),
+    });
+
+    if (res.ok) {
+        const result = await res.json();
+        const submitMessage = `Judging complete!\nScore: ${result.score}\nVerdict: ${result.verdict}`;
+        if (session) {
+            const submit = window.confirm(`${submitMessage}\n\nSubmit to leaderboard?`);
+            if (submit) {
+                handleSubmitToLeaderboard(result.score);
+            }
+        } else {
+            alert(`${submitMessage}\n\nSign in to submit your score to the leaderboard.`);
+        }
+    }
+  }
+
+  if (router.isFallback) {
+    return <div>Loading...</div>
+  }
+
+  return (
+    <div className="flex h-screen bg-gray-900 text-white font-mono">
+      {/* Left Panel */}
+      <div className="w-1/4 bg-gray-800 p-4 border-r border-gray-700 flex flex-col">
+        <h2 className="text-xl font-bold mb-4 text-green-400">{level.title}</h2>
+        <div className='mb-4'>
+          <h3 className="font-bold text-green-400">Attack Goal</h3>
+          <p className="text-sm text-gray-400 mt-2">
+            {level.goal}
+          </p>
+        </div>
+        <div className='flex-grow'>
+          <h3 className="font-bold text-green-400">Tools</h3>
+        </div>
+      </div>
+
+      {/* Center Panel */}
+      <div className="flex-1 flex flex-col p-4">
+        <div className="mb-4">
+            <button onClick={() => setView('chat')} className={`mr-2 py-2 px-4 rounded ${view === 'chat' ? 'bg-green-500 text-gray-900' : 'bg-gray-700'}`}>Chat</button>
+            <button onClick={() => setView('files')} className={`py-2 px-4 rounded ${view === 'files' ? 'bg-green-500 text-gray-900' : 'bg-gray-700'}`}>File Explorer</button>
+        </div>
+        {view === 'chat' ? (
+            <>
+                <div className="flex-1 mb-4 overflow-y-auto pr-4">
+                {messages.map((msg, index) => (
+                    <div key={index} className={`flex ${msg.role === 'attacker' ? 'justify-end' : 'justify-start'} mb-4`}>
+                    <div className={`p-3 rounded-lg max-w-prose ${msg.role === 'attacker' ? 'bg-green-900' : 'bg-gray-700'}`}>
+                        <p className='whitespace-pre-wrap'>{msg.content}</p>
+                    </div>
+                    </div>
+                ))}
+                <div ref={messagesEndRef} />
+                </div>
+                <div className="flex">
+                <input
+                    type="text"
+                    className="flex-1 bg-gray-700 rounded-l-md p-2 focus:outline-none text-white focus:ring-2 focus:ring-green-400"
+                    placeholder="Type your message..."
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                />
+                <button
+                    className="bg-green-500 hover:bg-green-600 text-gray-900 font-bold py-2 px-4 rounded-r-md"
+                    onClick={handleSendMessage}
+                >
+                    Send
+                </button>
+                </div>
+            </>
+        ) : (
+            <div className="flex-1 flex">
+                <div className="w-1/3">
+                    <FileSystemExplorer files={level.files} onFileSelect={handleFileSelect} />
+                </div>
+                <div className="w-2/3 bg-gray-800 rounded-lg p-4 ml-4 flex flex-col">
+                    {selectedFile ? (
+                        <>
+                            <h3 className="text-lg font-bold text-green-400 mb-4">{selectedFile.name}</h3>
+                            <textarea 
+                                className="flex-grow bg-gray-900 text-white p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400"
+                                value={editingContent}
+                                onChange={(e) => {
+                                    setEditingContent(e.target.value);
+                                    setHasUnsavedChanges(true);
+                                }}
+                            />
+                            <div className="mt-4">
+                                <button onClick={handleSaveFile} className="bg-green-500 hover:bg-green-600 text-gray-900 font-bold py-2 px-4 rounded mr-2">Save</button>
+                                <button onClick={handleCommit} disabled={!hasUnsavedChanges} className={`font-bold py-2 px-4 rounded ${hasUnsavedChanges ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>Commit</button>
+                            </div>
+                        </>
+                    ) : (
+                        <p className="text-gray-400">Select a file to view or edit its content.</p>
+                    )}
+                </div>
+            </div>
+        )}
+      </div>
+
+      {/* Right Panel */}
+      <div className="w-1/4 bg-gray-800 p-4 border-l border-gray-700">
+        <h2 className="text-xl font-bold mb-4 text-green-400">Stats</h2>
+        <div className="text-sm">
+          <p>Session ID: <span className="text-gray-400 break-all">{sessionId}</span></p>
+          <p>Messages: <span className="text-gray-400">{messages.length}</span></p>
+        </div>
+        <div className="mt-8">
+            <button onClick={handleJudge} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-2 px-4 rounded">Submit for Judging</button>
+        </div>
+        {getAdminMode() && (
+            <div className="mt-8">
+                <h2 className="text-xl font-bold mb-4 text-green-400">Internal Logs</h2>
+                <div className="text-xs bg-gray-900 p-2 rounded-md h-64 overflow-y-auto">
+                    {internalLogs.map((log, i) => <p key={i}>{log}</p>)}
+                </div>
+            </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export const getStaticPaths: GetStaticPaths = async () => {
+    const filePath = path.join(process.cwd(), 'config', 'levels.json');
+    const jsonData = fs.readFileSync(filePath, 'utf-8');
+    const levelsData: Level[] = JSON.parse(jsonData);
+
+    const paths = levelsData.map((level) => ({
+        params: { level: level.id },
+    }));
+
+    return { paths, fallback: true };
+}
+
+export const getStaticProps: GetStaticProps = async (context) => {
+    const { params } = context;
+    const levelId = params?.level as string;
+
+    const levelsFilePath = path.join(process.cwd(), 'config', 'levels.json');
+    const levelsJsonData = fs.readFileSync(levelsFilePath, 'utf-8');
+    const levels: Level[] = JSON.parse(levelsJsonData);
+
+    const fsFilePath = path.join(process.cwd(), 'config', 'filesystem.json');
+    const fsJsonData = fs.readFileSync(fsFilePath, 'utf-8');
+    const filesystems = JSON.parse(fsJsonData);
+
+  const level = levels.find((l) => l.id === levelId);
+  if (!level) {
+    return { notFound: true };
+  }
+
+  level.files = filesystems[level.id]?.files || [];
+
+  return {
+    props: {
+      level,
+    },
+  };
+}
+
+export default LevelPage;
