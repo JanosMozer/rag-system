@@ -1,6 +1,7 @@
 
 import type { NextPage } from 'next';
 import { useEffect, useState } from 'react';
+import Auth from '../components/Auth';
 
 interface LeaderboardEntry {
   rank: number;
@@ -36,9 +37,18 @@ const LeaderboardPage: NextPage = () => {
   return (
     <div className="min-h-screen bg-gray-900 text-white font-mono">
       <div className="container mx-auto p-8">
-        <h1 className="text-3xl font-bold text-center text-green-400 mb-8">Leaderboard</h1>
-        <h2 className="text-xl font-bold text-center text-gray-400 mb-8">Level 1: Basic Injection</h2>
-        
+        <header className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-green-400">Leaderboard</h1>
+            <p className="text-sm text-gray-400">See top contributors and sign in to submit your scores.</p>
+          </div>
+          <div>
+            <Auth />
+          </div>
+        </header>
+
+        <h2 className="text-xl font-bold text-gray-400 mb-6">Level 1: Basic Injection</h2>
+
         {loading ? (
           <p className="text-center">Loading...</p>
         ) : error ? (
@@ -56,7 +66,7 @@ const LeaderboardPage: NextPage = () => {
               </thead>
               <tbody>
                 {leaderboard.map((entry, index) => (
-                  <tr key={index} className="border-t border-gray-700">
+                  <tr key={index} className="border-t border-gray-700 hover:bg-gray-700 transition-all">
                     <td className="p-2">{entry.rank}</td>
                     <td className="p-2">{entry.name}</td>
                     <td className="p-2">{entry.score}</td>

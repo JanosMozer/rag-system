@@ -153,7 +153,7 @@ npm run lint
 ### Recommended Workflow:
 1. **Navigate to project:**
    ```bash
-   cd C:\Users\grego\OneDrive\Documents\BME_UNI_WORK\mesh\LLM_security\code_SECURITY_LLM\jailbreak_agent_game
+   cd C:\Users\grego\OneDrive\Documents\BME_UNI_WORK\mesh\LLM_security\code_SECURITY_LLM\rag-system\game
    ```
 
 2. **Make design changes** to files (start with `pages/index.tsx`)

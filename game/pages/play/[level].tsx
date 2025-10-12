@@ -171,54 +171,54 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
   }
 
   return (
-    <div className="flex h-screen bg-gray-900 text-white font-mono">
+  <div className="flex h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-900 text-white font-mono">
       {/* Left Panel */}
-      <div className="w-1/4 bg-gray-800 p-4 border-r border-gray-700 flex flex-col">
-        <h2 className="text-xl font-bold mb-4 text-green-400">{level.title}</h2>
+  <div className="w-1/4 bg-gray-800 p-4 border-r border-gray-700 flex flex-col hidden sm:flex">
+        <h2 className="text-xl font-bold mb-4 text-green-400 flex items-center gap-2"><span className="text-sm">▢</span>{level.title}</h2>
         <div className='mb-4'>
-          <h3 className="font-bold text-green-400">Attack Goal</h3>
+          <h3 className="font-bold text-green-400 flex items-center gap-2"><span className="text-yellow-400">⚑</span>Attack Goal</h3>
           <p className="text-sm text-gray-400 mt-2">
             {level.goal}
           </p>
         </div>
         <div className='flex-grow'>
-          <h3 className="font-bold text-green-400">Tools</h3>
+          <h3 className="font-bold text-green-400 flex items-center gap-2"><span className="text-blue-400">⌘</span>Tools</h3>
         </div>
       </div>
 
       {/* Center Panel */}
       <div className="flex-1 flex flex-col p-4">
-        <div className="mb-4">
-            <button onClick={() => setView('chat')} className={`mr-2 py-2 px-4 rounded ${view === 'chat' ? 'bg-green-500 text-gray-900' : 'bg-gray-700'}`}>Chat</button>
-            <button onClick={() => setView('files')} className={`py-2 px-4 rounded ${view === 'files' ? 'bg-green-500 text-gray-900' : 'bg-gray-700'}`}>File Explorer</button>
-        </div>
+    <div className="mb-4">
+      <button onClick={() => setView('chat')} className={`mr-2 py-2 px-4 rounded ${view === 'chat' ? 'bg-gradient-to-r from-green-500 to-green-400 text-gray-900 shadow-sm' : 'bg-gray-700 hover:bg-gray-600'}`}>💬 Chat</button>
+      <button onClick={() => setView('files')} className={`py-2 px-4 rounded ${view === 'files' ? 'bg-gradient-to-r from-green-500 to-green-400 text-gray-900 shadow-sm' : 'bg-gray-700 hover:bg-gray-600'}`}>📁 File Explorer</button>
+    </div>
         {view === 'chat' ? (
             <>
                 <div className="flex-1 mb-4 overflow-y-auto pr-4">
                 {messages.map((msg, index) => (
                     <div key={index} className={`flex ${msg.role === 'attacker' ? 'justify-end' : 'justify-start'} mb-4`}>
-                    <div className={`p-3 rounded-lg max-w-prose ${msg.role === 'attacker' ? 'bg-green-900' : 'bg-gray-700'}`}>
-                        <p className='whitespace-pre-wrap'>{msg.content}</p>
-                    </div>
+              <div className={`p-3 rounded-lg max-w-prose ${msg.role === 'attacker' ? 'bg-gradient-to-r from-green-900 to-green-800 text-gray-100' : 'bg-gray-700'}`}>
+                <p className='whitespace-pre-wrap'>{msg.content}</p>
+              </div>
                     </div>
                 ))}
                 <div ref={messagesEndRef} />
                 </div>
                 <div className="flex">
-                <input
-                    type="text"
-                    className="flex-1 bg-gray-700 rounded-l-md p-2 focus:outline-none text-white focus:ring-2 focus:ring-green-400"
-                    placeholder="Type your message..."
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                />
-                <button
-                    className="bg-green-500 hover:bg-green-600 text-gray-900 font-bold py-2 px-4 rounded-r-md"
-                    onClick={handleSendMessage}
-                >
-                    Send
-                </button>
+        <input
+          type="text"
+          className="flex-1 bg-gray-800 rounded-l-md p-2 focus:outline-none text-white focus:ring-2 focus:ring-green-400 border border-gray-700"
+          placeholder="Type your message..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+        />
+        <button
+          className="bg-gradient-to-r from-green-500 to-green-400 hover:brightness-110 text-gray-900 font-bold py-2 px-4 rounded-r-md shadow-sm"
+          onClick={handleSendMessage}
+        >
+          ➤ Send
+        </button>
                 </div>
             </>
         ) : (
