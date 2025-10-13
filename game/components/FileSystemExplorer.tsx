@@ -112,7 +112,7 @@ const FileSystemExplorer: React.FC<FileSystemExplorerProps> = ({ files, committe
                     )
                 })}
             </ul>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 flex flex-col gap-2">
                 {allowsFiles && onUpload && showUpload && (
                     <label className="inline-block bg-gray-700 hover:bg-gray-600 py-2 px-3 rounded cursor-pointer text-sm">
                         Upload file
