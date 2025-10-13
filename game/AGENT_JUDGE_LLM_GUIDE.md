@@ -83,6 +83,12 @@ Your primary task is to replace the mocked logic within these two backend API en
 3.  **Generate Internal Logs**: If `isAdmin` is true, generate detailed internal logs of the agent's thought process, tool usage, and any other relevant debugging information.
 4.  **Return Response**: Format the agent's response according to the `Expected Response Payload`.
 
+**Important implementation note (inference / usage statistics):** The frontend displays inference and usage statistics in the level UI (for example: token counts, inference latency). These metrics must be provided by the backend agent endpoint inside the response (for example under `stats` or `tokensUsed`). Ensure your agent integration collects model usage info (prompt/completion tokens, model identifier, inference timing) and returns them in the response so the UI can show accurate statistics.
+
+### Single-turn vs Multi-turn
+
+Some levels are configured to be single-turn (the player composes a single composite move — which may include chat content, file uploads, and commits — and then submits it for backend processing). Other levels are multi-turn where the attacker and the agent can exchange multiple messages. The frontend will indicate the mode for each level and will send a `singleTurn: true` boolean in the `/api/agent/message` payload for single-turn levels. The backend should treat single-turn requests as an atomic interaction and return both the agent reply and any evaluation-ready artifacts or stats. For single-turn levels, the frontend expects the input box to remain populated after submission so users can refine or resubmit their composite move if needed.
+
 #### 2.2.2. `POST /api/judge/evaluate`
 
 **Purpose**: This endpoint evaluates the attacker's interaction with the agent to determine if the attack was successful. It combines deterministic checks with an LLM-based judgment.

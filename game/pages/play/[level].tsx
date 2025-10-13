@@ -1,7 +1,9 @@
 import type { NextPage, GetStaticPaths, GetStaticProps } from 'next';
 import { useRouter } from 'next/router';
+import Link from 'next/link';
 import { useEffect, useState, useRef } from 'react';
 import { getSessionId } from '../../lib/session';
+import { playClick } from '../../lib/sound';
 import fs from 'fs';
 import path from 'path';
 import FileSystemExplorer from '../../components/FileSystemExplorer';
@@ -25,6 +27,10 @@ interface Level {
     description: string;
     goal: string;
     files: FileData[];
+  singleTurn?: boolean;
+  allowsFiles?: boolean;
+  unlockedBy?: string | null;
+  gameId?: string;
 }
 
 interface LevelPageProps {
@@ -44,6 +50,12 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [committedState, setCommittedState] = useState<FileData[]>(initialLevel.files || []);
   const [internalLogs, setInternalLogs] = useState<string[]>([]);
+  interface Stats {
+    tokens?: number;
+    latency?: number;
+    [k: string]: unknown;
+  }
+  const [stats, setStats] = useState<Stats | null>(null);
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -61,9 +73,53 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
     setSessionId(getSessionId());
   }, []);
 
+  // Sync server-side progress for authenticated users
+  useEffect(() => {
+    const fetchProgress = async () => {
+      if (!session) return;
+      try {
+        const res = await fetch('/api/progress');
+        if (res.ok) {
+          const data = await res.json();
+          // merge completed levels and scores locally
+          try {
+            const rawScores = localStorage.getItem('levelScores');
+            const scores = rawScores ? JSON.parse(rawScores) : {};
+            const mergedScores = { ...scores, ...(data.levelScores || {}) };
+            // prefer max values
+            for (const k of Object.keys(mergedScores)) {
+              mergedScores[k] = Math.max(scores[k] || 0, mergedScores[k] || 0);
+            }
+            localStorage.setItem('levelScores', JSON.stringify(mergedScores));
+
+            const rawCompleted = localStorage.getItem('completedLevels');
+            const comp = rawCompleted ? JSON.parse(rawCompleted) : [];
+            const mergedCompleted = Array.from(new Set([...(comp || []), ...(data.completedLevels || [])]));
+            localStorage.setItem('completedLevels', JSON.stringify(mergedCompleted));
+          } catch {}
+        }
+      } catch { }
+    }
+    fetchProgress();
+  }, [session]);
+
   const handleFileSelect = (file: FileData) => {
     setSelectedFile(file);
     setEditingContent(file.content);
+  }
+
+  const handleUploadFile = (file: FileData) => {
+    setLevel(prev => ({ ...prev, files: [...(prev.files || []), file] }));
+    setCommittedState(prev => ([...prev, file]));
+  }
+
+  const handleDeleteFile = (fileName: string) => {
+    setLevel(prev => ({ ...prev, files: (prev.files || []).filter(f => f.name !== fileName) }));
+    setCommittedState(prev => prev.filter(f => f.name !== fileName));
+    if (selectedFile?.name === fileName) {
+      setSelectedFile(null);
+      setEditingContent('');
+    }
   }
 
   const handleSaveFile = () => {
@@ -93,7 +149,8 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
 
     const userMessage: Message = { role: 'attacker', content: input };
     setMessages((prev) => [...prev, userMessage]);
-    setInput('');
+    // For multi-turn clear input; for single-turn keep it (user may want to edit their single move)
+    if (!level.singleTurn) setInput('');
 
     const res = await fetch('/api/agent/message', {
       method: 'POST',
@@ -106,6 +163,7 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
         message: userMessage,
         files: committedState,
         isAdmin: getAdminMode(),
+        singleTurn: !!level.singleTurn,
       }),
     });
 
@@ -113,6 +171,8 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
       const data = await res.json();
       const agentMessage: Message = { role: 'assistant', content: data.reply, internalLogs: data.internalLogs };
       setMessages((prev) => [...prev, agentMessage]);
+      // backend may include inference stats (tokens, latency, etc.) in response
+      if (data.stats) setStats(data.stats);
       if (data.internalLogs) {
         setInternalLogs(prev => [...prev, ...data.internalLogs]);
       }
@@ -155,13 +215,44 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
     if (res.ok) {
         const result = await res.json();
         const submitMessage = `Judging complete!\nScore: ${result.score}\nVerdict: ${result.verdict}`;
-        if (session) {
-            const submit = window.confirm(`${submitMessage}\n\nSubmit to leaderboard?`);
-            if (submit) {
-                handleSubmitToLeaderboard(result.score);
+    // store per-level score locally
+    try {
+      const rawScores = localStorage.getItem('levelScores');
+      const scores = rawScores ? JSON.parse(rawScores) : {};
+      scores[level.id] = Math.max(scores[level.id] || 0, result.score);
+      localStorage.setItem('levelScores', JSON.stringify(scores));
+    } catch {}
+
+    if (session) {
+      // auto-submit to global leaderboard if signed in
+      handleSubmitToLeaderboard(result.score);
+    } else {
+      alert(`${submitMessage}\n\nSign in to submit your score to the leaderboard.`);
+    }
+        // If judged successful, mark level complete so next level unlocks (client-side)
+        if (result.verdict === 'success') {
+          try {
+            const raw = localStorage.getItem('completedLevels');
+            const arr = raw ? JSON.parse(raw) : [];
+            if (!arr.includes(level.id)) {
+              arr.push(level.id);
+              localStorage.setItem('completedLevels', JSON.stringify(arr));
             }
-        } else {
-            alert(`${submitMessage}\n\nSign in to submit your score to the leaderboard.`);
+          } catch {}
+              // Also post progress to server so it's persisted
+              try {
+                const rawScores = localStorage.getItem('levelScores');
+                const scores = rawScores ? JSON.parse(rawScores) : {};
+                const rawCompleted = localStorage.getItem('completedLevels');
+                const completed = rawCompleted ? JSON.parse(rawCompleted) : [];
+                if (session) {
+                  await fetch('/api/progress', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ completedLevels: completed, levelScores: scores }),
+                  });
+                }
+      } catch { }
         }
     }
   }
@@ -174,7 +265,14 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
   <div className="flex h-screen bg-gradient-to-b from-gray-950 via-gray-900 to-gray-900 text-white font-mono">
       {/* Left Panel */}
   <div className="w-1/4 bg-gray-800 p-4 border-r border-gray-700 flex flex-col hidden sm:flex">
-        <h2 className="text-xl font-bold mb-4 text-green-400 flex items-center gap-2"><span className="text-sm">▢</span>{level.title}</h2>
+        <div className="mb-2">
+          <Link href="/" className="inline-block text-sm bg-gray-700 hover:bg-gray-600 text-green-300 px-3 py-2 rounded" onClick={() => playClick()}>← Go back</Link>
+        </div>
+        <h2 className="text-xl font-bold mb-4 text-green-400 flex items-center gap-2">
+          <span className="text-sm">▢</span>
+          {level.title}
+          <span className="ml-2 text-xs text-yellow-300">{level.singleTurn ? 'Single-turn' : 'Multi-turn'}</span>
+        </h2>
         <div className='mb-4'>
           <h3 className="font-bold text-green-400 flex items-center gap-2"><span className="text-yellow-400">⚑</span>Attack Goal</h3>
           <p className="text-sm text-gray-400 mt-2">
@@ -213,9 +311,9 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
         />
-        <button
+                <button
           className="bg-gradient-to-r from-green-500 to-green-400 hover:brightness-110 text-gray-900 font-bold py-2 px-4 rounded-r-md shadow-sm"
-          onClick={handleSendMessage}
+                  onClick={() => { playClick(); handleSendMessage(); }}
         >
           ➤ Send
         </button>
@@ -223,9 +321,9 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
             </>
         ) : (
             <div className="flex-1 flex">
-                <div className="w-1/3">
-                    <FileSystemExplorer files={level.files} onFileSelect={handleFileSelect} />
-                </div>
+        <div className="w-1/3">
+          <FileSystemExplorer files={level.files} onFileSelect={handleFileSelect} allowsFiles={!!level.allowsFiles} onUpload={handleUploadFile} onDelete={handleDeleteFile} />
+        </div>
                 <div className="w-2/3 bg-gray-800 rounded-lg p-4 ml-4 flex flex-col">
                     {selectedFile ? (
                         <>
@@ -239,8 +337,8 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
                                 }}
                             />
                             <div className="mt-4">
-                                <button onClick={handleSaveFile} className="bg-green-500 hover:bg-green-600 text-gray-900 font-bold py-2 px-4 rounded mr-2">Save</button>
-                                <button onClick={handleCommit} disabled={!hasUnsavedChanges} className={`font-bold py-2 px-4 rounded ${hasUnsavedChanges ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>Commit</button>
+                                <button onClick={() => { playClick(); handleSaveFile(); }} className="bg-green-500 hover:bg-green-600 text-gray-900 font-bold py-2 px-4 rounded mr-2">Save</button>
+                                <button onClick={() => { playClick(); handleCommit(); }} disabled={!hasUnsavedChanges} className={`font-bold py-2 px-4 rounded ${hasUnsavedChanges ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>Commit</button>
                             </div>
                         </>
                     ) : (
@@ -256,8 +354,36 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
         <h2 className="text-xl font-bold mb-4 text-green-400">Stats</h2>
         <div className="text-sm">
           <p>Session ID: <span className="text-gray-400 break-all">{sessionId}</span></p>
-          <p>Messages: <span className="text-gray-400">{messages.length}</span></p>
+          <p>Attacker messages: <span className="text-gray-400">{messages.filter(m => m.role === 'attacker').length}</span></p>
+          {stats && (
+            <div className="mt-3 text-xs text-gray-300">
+              <div>Tokens used: {stats.tokens ?? '—'}</div>
+              <div>Latency: {stats.latency ?? '—'} ms</div>
+            </div>
+          )}
         </div>
+                {/* Start Attack button for multi-action levels */}
+                {(level.singleTurn || level.allowsFiles) && (
+                  <div className="mt-3">
+                    <button onClick={async () => {
+                      const actionPayload = { sessionId, levelId: level.id, message: { role: 'attacker', content: input }, files: committedState, isAdmin: getAdminMode(), action: 'startAttack', singleTurn: !!level.singleTurn };
+                      const res = await fetch('/api/agent/message', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(actionPayload) });
+                      if (res.ok) {
+                        const data = await res.json();
+                        if (data.reply) setMessages(prev => [...prev, { role: 'assistant', content: data.reply, internalLogs: data.internalLogs }]);
+                        if (data.stats) setStats(data.stats);
+                        if (data.score) {
+                          try {
+                            const rawScores = localStorage.getItem('levelScores');
+                            const scores = rawScores ? JSON.parse(rawScores) : {};
+                            scores[level.id] = Math.max(scores[level.id] || 0, data.score);
+                            localStorage.setItem('levelScores', JSON.stringify(scores));
+                          } catch {}
+                        }
+                      }
+                    }} className="mt-2 bg-purple-600 hover:bg-purple-500 text-white py-2 px-4 rounded">{level.singleTurn ? 'Submit move' : 'Start Attack'}</button>
+                  </div>
+                )}
         <div className="mt-8">
             <button onClick={handleJudge} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-2 px-4 rounded">Submit for Judging</button>
         </div>
