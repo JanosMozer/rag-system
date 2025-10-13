@@ -27,22 +27,34 @@ interface HomeProps {
 }
 
 const Home: NextPage<HomeProps> = ({ levels }) => {
-  const [isAdmin, setIsAdmin] = useState(false);
-  
-  const [completedLevels, setCompletedLevels] = useState<string[]>([]);
-  const [levelScores, setLevelScores] = useState<Record<string, number>>({});
-  const { data: session } = useSession();
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return getAdminMode();
+  });
 
-  useEffect(() => {
+  const [completedLevels, setCompletedLevels] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
     try {
       const raw = localStorage.getItem('completedLevels');
-      if (raw) setCompletedLevels(JSON.parse(raw));
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
+
+  const [levelScores, setLevelScores] = useState<Record<string, number>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
       const rawScores = localStorage.getItem('levelScores');
-      const scores = rawScores ? JSON.parse(rawScores) : {};
-    setLevelScores(scores);
-    // total score is displayed in the shared Sidebar component
-    } catch { }
-  }, []);
+      return rawScores ? JSON.parse(rawScores) : {};
+    } catch { return {}; }
+  });
+  const { data: session } = useSession();
+
+  // Hydration flag: avoid rendering level availability on the server to prevent
+  // flicker/hydration mismatch with client-localStorage-derived state.
+  const [hydrated, setHydrated] = useState<boolean>(false);
+  useEffect(() => { setHydrated(true); }, []);
+
+  // completedLevels and levelScores are initialized synchronously from localStorage to avoid UI flicker.
 
   // Fetch server progress when user is signed in and merge into localStorage
   useEffect(() => {
@@ -78,24 +90,13 @@ const Home: NextPage<HomeProps> = ({ levels }) => {
     fetchProgress();
   }, [session]);
 
-  const completeLevel = (levelId: string) => {
-    const next = Array.from(new Set([...completedLevels, levelId]));
-    setCompletedLevels(next);
-    try { localStorage.setItem('completedLevels', JSON.stringify(next)); } catch {}
-    // If signed in, persist to server (skip when not authenticated to avoid 401s during dev)
-    if (session) {
-      (async () => {
-        try {
-          const rawScores = localStorage.getItem('levelScores');
-          const scores = rawScores ? JSON.parse(rawScores) : {};
-          await fetch('/api/progress', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ completedLevels: next, levelScores: scores }) });
-        } catch { }
-      })();
-    }
-  }
+  // note: level completion is handled by the judge flow in play/[level].tsx
 
   useEffect(() => {
     setIsAdmin(getAdminMode());
+    const onStorage = () => setIsAdmin(getAdminMode());
+    if (typeof window !== 'undefined') window.addEventListener('storage', onStorage);
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage); };
   }, []);
 
   const toggleAdminMode = () => {
@@ -147,40 +148,50 @@ const Home: NextPage<HomeProps> = ({ levels }) => {
                   <div className="mt-6">
                     <h4 className="text-lg font-semibold text-green-400 mb-3">Levels</h4>
                     <div className="space-y-3">
-                      {levels.map((level) => {
-                        const locked = !!level.unlockedBy && !completedLevels.includes(level.unlockedBy);
-                        // Only the latest unblocked level should have play button. Find last unlocked index
-                        const unlockedLevels = levels.filter(l => !l.unlockedBy || completedLevels.includes(l.unlockedBy));
-                        const latestUnlocked = unlockedLevels.length ? unlockedLevels[unlockedLevels.length - 1].id : null;
-                        const showPlay = latestUnlocked === level.id;
-                        return (
-                          <div key={level.id} className={`flex items-center gap-4 ${locked ? 'opacity-60' : ''} bg-gray-900 p-3 rounded border border-gray-800`}>
-                            <div className="flex-1">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <div className="text-sm text-gray-300 flex items-center gap-2"><FiAlertCircle className="text-yellow-300" />{level.title} <span className="text-xs text-yellow-300 ml-2">{level.singleTurn ? 'Single-turn' : 'Multi-turn'}</span></div>
-                                  <div className="text-xs text-gray-500">{level.description}</div>
-                                </div>
-                                <div className="w-48">
-                                  <div className="w-full bg-gray-800 h-2 rounded overflow-hidden">
-                                    <div className="bg-green-500 h-2 rounded" style={{ width: `${Math.min(100, levelScores[level.id] || 0)}%` }} />
+                      {/* Render levels only on the client to ensure availability is computed
+                          from synchronous localStorage reads and avoid hydration flips. */}
+                      {hydrated ? (() => {
+                        // Determine unlocked status per-level deterministically
+                        const isUnlocked = (lvl: Level) => lvl.unlockedBy === null || completedLevels.includes(lvl.unlockedBy as string);
+                        let lastUnlockedIndex = -1;
+                        for (let i = 0; i < levels.length; i++) {
+                          if (isUnlocked(levels[i])) lastUnlockedIndex = i;
+                        }
+
+                        return levels.map((level, idx) => {
+                          const locked = !isAdmin && !isUnlocked(level);
+                          const showPlay = isAdmin || idx === lastUnlockedIndex;
+                          return (
+                            <div key={level.id} className={`flex items-center gap-4 ${locked ? 'opacity-60' : ''} bg-gray-900 p-3 rounded border border-gray-800`}>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <div className="text-sm text-gray-300 flex items-center gap-2"><FiAlertCircle className="text-yellow-300" />{level.title} <span className="text-xs text-yellow-300 ml-2">{level.singleTurn ? 'Single-turn' : 'Multi-turn'}</span></div>
+                                    <div className="text-xs text-gray-500">{level.description}</div>
+                                  </div>
+                                  <div className="w-48">
+                                    <div className="w-full bg-gray-800 h-2 rounded overflow-hidden">
+                                      <div className="bg-green-500 h-2 rounded" style={{ width: `${Math.min(100, levelScores[level.id] || 0)}%` }} />
+                                    </div>
                                   </div>
                                 </div>
+                                <div className="mt-2 text-xs text-gray-500">Progress: {levelScores[level.id] ? `${levelScores[level.id]}%` : '0%'}</div>
                               </div>
-                              <div className="mt-2 text-xs text-gray-500">Progress: {levelScores[level.id] ? `${levelScores[level.id]}%` : '0%'}</div>
+                              <div>
+                                {showPlay ? (
+                                  <Link href={`/play/${level.id}`} onClick={() => playClick()} className="inline-block bg-gradient-to-r from-green-500 to-green-400 text-gray-900 font-bold py-2 px-4 rounded hover:brightness-110 transition-all">Play Now</Link>
+                                ) : (
+                                  <button className="inline-block bg-gray-700 text-gray-300 font-semibold py-2 px-3 rounded cursor-not-allowed">Locked</button>
+                                )}
+                              </div>
                             </div>
-                            <div>
-                                    {locked ? (
-                                      <button className="inline-block bg-gray-700 text-gray-300 font-semibold py-2 px-3 rounded cursor-not-allowed">Locked</button>
-                                    ) : showPlay ? (
-                                      <Link href={`/play/${level.id}`} onClick={() => playClick()} className="inline-block bg-gradient-to-r from-green-500 to-green-400 text-gray-900 font-bold py-2 px-4 rounded hover:brightness-110 transition-all">Play Now</Link>
-                                    ) : (
-                                      <button onClick={() => { playClick(); completeLevel(level.id); }} className="inline-block bg-gray-700 text-gray-300 font-semibold py-2 px-3 rounded">Unlock</button>
-                                    )}
-                            </div>
-                          </div>
-                        )
-                      })}
+                          )
+                        })
+                      })() : (
+                        // While hydrating, show a neutral loading placeholder to avoid showing
+                        // incorrect play/locked states briefly.
+                        <div className="text-center text-gray-400 py-8">Loading levels...</div>
+                      )}
                     </div>
                   </div>
                 </div>

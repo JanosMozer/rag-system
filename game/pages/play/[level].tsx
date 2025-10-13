@@ -7,6 +7,7 @@ import { playClick } from '../../lib/sound';
 import fs from 'fs';
 import path from 'path';
 import FileSystemExplorer from '../../components/FileSystemExplorer';
+import { lineDiff, formatUnifiedDiff } from '../../lib/diff';
 import { useSession } from 'next-auth/react';
 import { getAdminMode } from '../../lib/admin';
 
@@ -31,6 +32,8 @@ interface Level {
   allowsFiles?: boolean;
   unlockedBy?: string | null;
   gameId?: string;
+  upload_files?: boolean;
+  make_new_file?: boolean;
 }
 
 interface LevelPageProps {
@@ -41,6 +44,12 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
   const router = useRouter();
   const { data: session } = useSession();
   const [level, setLevel] = useState(initialLevel);
+  // Initialize admin mode synchronously from localStorage to avoid render-time
+  // mismatches and flicker when getAdminMode() is called inline during render.
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try { return getAdminMode(); } catch { return false; }
+  });
   const [sessionId, setSessionId] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
@@ -57,6 +66,7 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
   }
   const [stats, setStats] = useState<Stats | null>(null);
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,6 +77,14 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
       scrollToBottom();
     }
   }, [messages, view]);
+
+  // Auto-focus editor when selected file changes
+  useEffect(() => {
+    if (selectedFile && editorRef.current) {
+      // small timeout to ensure textarea is rendered
+      setTimeout(() => editorRef.current?.focus(), 50);
+    }
+  }, [selectedFile]);
 
 
   useEffect(() => {
@@ -103,19 +121,38 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
     fetchProgress();
   }, [session]);
 
+  // Keep isAdmin in sync across tabs
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'adminMode') {
+        setIsAdmin(getAdminMode());
+      }
+    };
+    if (typeof window !== 'undefined') window.addEventListener('storage', onStorage);
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage); };
+  }, []);
+
   const handleFileSelect = (file: FileData) => {
     setSelectedFile(file);
     setEditingContent(file.content);
   }
 
   const handleUploadFile = (file: FileData) => {
+    // Add file to current working files. Don't mark as committed — it's a new untracked file until commit.
     setLevel(prev => ({ ...prev, files: [...(prev.files || []), file] }));
-    setCommittedState(prev => ([...prev, file]));
+  }
+
+  const handleCreateNewFile = (name: string) => {
+    const newFile: FileData = { name, content: '' };
+    setLevel(prev => ({ ...prev, files: [...(prev.files || []), newFile] }));
+    setSelectedFile(newFile);
+    setEditingContent('');
+    setHasUnsavedChanges(true);
   }
 
   const handleDeleteFile = (fileName: string) => {
+    // Remove from working files. Keep committedState untouched until user commits so deletion is shown as a change.
     setLevel(prev => ({ ...prev, files: (prev.files || []).filter(f => f.name !== fileName) }));
-    setCommittedState(prev => prev.filter(f => f.name !== fileName));
     if (selectedFile?.name === fileName) {
       setSelectedFile(null);
       setEditingContent('');
@@ -139,9 +176,41 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
   }
 
   const handleCommit = () => {
+    // compute diffs between previous committedState and current level.files
+    try {
+      const prevMap: Record<string, string> = {};
+      for (const f of committedState) prevMap[f.name] = f.content;
+      const diffs: { name: string; diff: string; timestamp: string; author: string }[] = [];
+      const currentMap: Record<string, string> = {};
+      for (const f of level.files) currentMap[f.name] = f.content;
+      for (const f of level.files) {
+        const prev = prevMap[f.name] ?? '';
+        if (prev !== f.content) {
+          const ops = lineDiff(prev, f.content);
+          const diffText = formatUnifiedDiff(ops, f.name);
+          diffs.push({ name: f.name, diff: diffText, timestamp: new Date().toISOString(), author: sessionId });
+        }
+      }
+      // detect deletions: files present in prevMap but missing now
+      for (const name of Object.keys(prevMap)) {
+        if (!(name in currentMap)) {
+          const prev = prevMap[name] ?? '';
+          const ops = lineDiff(prev, '');
+          const diffText = formatUnifiedDiff(ops, name);
+          diffs.push({ name, diff: diffText, timestamp: new Date().toISOString(), author: sessionId });
+        }
+      }
+      // store diffs in localStorage under a per-level key
+      if (diffs.length) {
+        const raw = localStorage.getItem(`level-diffs:${level.id}`);
+        const arr = raw ? JSON.parse(raw) : [];
+        arr.push(...diffs);
+        localStorage.setItem(`level-diffs:${level.id}`, JSON.stringify(arr));
+      }
+    } catch { }
     setCommittedState(level.files);
     setHasUnsavedChanges(false);
-    alert('Changes committed!');
+    alert('Changes committed! (diffs saved locally)');
   }
 
   const handleSendMessage = async () => {
@@ -162,7 +231,7 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
         levelId: level.id,
         message: userMessage,
         files: committedState,
-        isAdmin: getAdminMode(),
+  isAdmin: isAdmin,
         singleTurn: !!level.singleTurn,
       }),
     });
@@ -273,11 +342,11 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
           {level.title}
           <span className="ml-2 text-xs text-yellow-300">{level.singleTurn ? 'Single-turn' : 'Multi-turn'}</span>
         </h2>
-        <div className='mb-4'>
-          <h3 className="font-bold text-green-400 flex items-center gap-2"><span className="text-yellow-400">⚑</span>Attack Goal</h3>
-          <p className="text-sm text-gray-400 mt-2">
-            {level.goal}
-          </p>
+        <div className="mb-4">
+          <button onClick={() => setView('chat')} className={`mr-2 py-2 px-4 rounded ${view === 'chat' ? 'bg-gradient-to-r from-green-500 to-green-400 text-gray-900 shadow-sm' : 'bg-gray-700 hover:bg-gray-600'}`}>💬 Chat</button>
+          {level.allowsFiles && (
+            <button onClick={() => setView('files')} className={`py-2 px-4 rounded ${view === 'files' ? 'bg-gradient-to-r from-green-500 to-green-400 text-gray-900 shadow-sm' : 'bg-gray-700 hover:bg-gray-600'}`}>📁 File Explorer</button>
+          )}
         </div>
         <div className='flex-grow'>
           <h3 className="font-bold text-green-400 flex items-center gap-2"><span className="text-blue-400">⌘</span>Tools</h3>
@@ -288,9 +357,11 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
       <div className="flex-1 flex flex-col p-4">
     <div className="mb-4">
       <button onClick={() => setView('chat')} className={`mr-2 py-2 px-4 rounded ${view === 'chat' ? 'bg-gradient-to-r from-green-500 to-green-400 text-gray-900 shadow-sm' : 'bg-gray-700 hover:bg-gray-600'}`}>💬 Chat</button>
-      <button onClick={() => setView('files')} className={`py-2 px-4 rounded ${view === 'files' ? 'bg-gradient-to-r from-green-500 to-green-400 text-gray-900 shadow-sm' : 'bg-gray-700 hover:bg-gray-600'}`}>📁 File Explorer</button>
+      {level.allowsFiles && (
+        <button onClick={() => setView('files')} className={`py-2 px-4 rounded ${view === 'files' ? 'bg-gradient-to-r from-green-500 to-green-400 text-gray-900 shadow-sm' : 'bg-gray-700 hover:bg-gray-600'}`}>📁 File Explorer</button>
+      )}
     </div>
-        {view === 'chat' ? (
+    {view === 'chat' ? (
             <>
                 <div className="flex-1 mb-4 overflow-y-auto pr-4">
                 {messages.map((msg, index) => (
@@ -319,23 +390,34 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
         </button>
                 </div>
             </>
-        ) : (
+        ) : level.allowsFiles ? (
             <div className="flex-1 flex">
-        <div className="w-1/3">
-          <FileSystemExplorer files={level.files} onFileSelect={handleFileSelect} allowsFiles={!!level.allowsFiles} onUpload={handleUploadFile} onDelete={handleDeleteFile} />
+          <div className="w-1/3">
+          <FileSystemExplorer
+            files={level.files}
+            committedFiles={committedState}
+            onFileSelect={handleFileSelect}
+            allowsFiles={!!level.allowsFiles}
+            onUpload={handleUploadFile}
+            onDelete={handleDeleteFile}
+            showUpload={!!level.upload_files}
+            showMakeNewFile={!!level.make_new_file}
+            onCreateNewFile={handleCreateNewFile}
+          />
         </div>
                 <div className="w-2/3 bg-gray-800 rounded-lg p-4 ml-4 flex flex-col">
                     {selectedFile ? (
                         <>
                             <h3 className="text-lg font-bold text-green-400 mb-4">{selectedFile.name}</h3>
-                            <textarea 
-                                className="flex-grow bg-gray-900 text-white p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400"
-                                value={editingContent}
-                                onChange={(e) => {
-                                    setEditingContent(e.target.value);
-                                    setHasUnsavedChanges(true);
-                                }}
-                            />
+              <textarea 
+                ref={editorRef}
+                className="flex-grow bg-gray-900 text-white p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400"
+                value={editingContent}
+                onChange={(e) => {
+                  setEditingContent(e.target.value);
+                  setHasUnsavedChanges(true);
+                }}
+              />
                             <div className="mt-4">
                                 <button onClick={() => { playClick(); handleSaveFile(); }} className="bg-green-500 hover:bg-green-600 text-gray-900 font-bold py-2 px-4 rounded mr-2">Save</button>
                                 <button onClick={() => { playClick(); handleCommit(); }} disabled={!hasUnsavedChanges} className={`font-bold py-2 px-4 rounded ${hasUnsavedChanges ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>Commit</button>
@@ -346,7 +428,7 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
                     )}
                 </div>
             </div>
-        )}
+        ) : null}
       </div>
 
       {/* Right Panel */}
@@ -366,7 +448,7 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
                 {(level.singleTurn || level.allowsFiles) && (
                   <div className="mt-3">
                     <button onClick={async () => {
-                      const actionPayload = { sessionId, levelId: level.id, message: { role: 'attacker', content: input }, files: committedState, isAdmin: getAdminMode(), action: 'startAttack', singleTurn: !!level.singleTurn };
+                      const actionPayload = { sessionId, levelId: level.id, message: { role: 'attacker', content: input }, files: committedState, isAdmin: isAdmin, action: 'startAttack', singleTurn: !!level.singleTurn };
                       const res = await fetch('/api/agent/message', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(actionPayload) });
                       if (res.ok) {
                         const data = await res.json();
@@ -387,7 +469,7 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
         <div className="mt-8">
             <button onClick={handleJudge} className="w-full bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-2 px-4 rounded">Submit for Judging</button>
         </div>
-        {getAdminMode() && (
+        {isAdmin && (
             <div className="mt-8">
                 <h2 className="text-xl font-bold mb-4 text-green-400">Internal Logs</h2>
                 <div className="text-xs bg-gray-900 p-2 rounded-md h-64 overflow-y-auto">
