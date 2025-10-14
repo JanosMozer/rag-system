@@ -272,16 +272,23 @@ const LevelPage: NextPage<LevelPageProps> = ({ level: initialLevel = { id: '', t
   };
 
   const handleSubmitToLeaderboard = async (score: number) => {
-    const res = await fetch('/api/leaderboard', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            levelId: level.id,
-            score,
-        }),
-    });
+  let name = undefined as string | undefined;
+  if (!session) {
+    // prompt for display name when anonymous
+    // eslint-disable-next-line no-alert
+    name = window.prompt('Enter display name for leaderboard (or leave blank to stay anonymous):') || undefined;
+  }
+
+  const body: { levelId: string; score: number; name?: string } = { levelId: level.id, score };
+  if (name) body.name = name;
+
+  const res = await fetch('/api/leaderboard', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
 
     if (res.ok) {
         alert('Score submitted to leaderboard!');

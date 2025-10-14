@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@vercel/kv": "^3.0.0",
+    "@supabase/supabase-js": "^2.0.0",
     "next": "14.x",
     "next-auth": "^4.24.11",
     "react": "18.x",

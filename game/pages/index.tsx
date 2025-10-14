@@ -27,10 +27,9 @@ interface HomeProps {
 }
 
 const Home: NextPage<HomeProps> = ({ levels }) => {
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return getAdminMode();
-  });
+  // Start with a stable server-safe value to avoid hydration mismatch.
+  // `getAdminMode()` reads localStorage and is applied on the client in an effect below.
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   const [completedLevels, setCompletedLevels] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -118,7 +117,7 @@ const Home: NextPage<HomeProps> = ({ levels }) => {
                 <h2 className="text-4xl font-bold text-green-400">Retro hacking playground</h2>
                 <p className="text-sm text-gray-400 mt-1">A game to hack LLM agents and improve AI security.</p>
               </div>
-              <div className="hidden md:block text-sm text-gray-400">Play responsibly — for education only</div>
+              {/* <div className="hidden md:block text-sm text-gray-400">Play responsibly — for education only</div> */}
             </header>
 
             <section>
